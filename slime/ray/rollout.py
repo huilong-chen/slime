@@ -170,6 +170,9 @@ def _start_router(args):
     if hasattr(router_args, "log_level"):
         router_args.log_level = "warn"
 
+    if hasattr(router_args, "request_timeout_secs"):
+        router_args.request_timeout_secs = args.sglang_router_request_timeout_secs
+
     process = multiprocessing.Process(
         target=run_router,
         args=(router_args,),
@@ -202,8 +205,6 @@ class RolloutManager:
         ).remote()
 
     def async_generate(self, rollout_id, evaluation=False):
-        if self.args.debug_train_only:
-            return
         return self.data_buffer.generate.remote(rollout_id, evaluation=evaluation)
 
     def async_reset_prefix_cache(self):

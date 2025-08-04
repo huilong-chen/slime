@@ -95,7 +95,7 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--rollout-function-path",
                 type=str,
-                default="slime.rollout.sglang_example.generate_rollout",
+                default="slime.rollout.sglang_rollout.generate_rollout",
                 help=(
                     "Path to the rollout generation function."
                     "You should use this model to create your own custom rollout function, "
@@ -390,17 +390,6 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             )
             # mbs for the training, will be ignored if `use_dynamic_batch_size` is set.
             reset_megatron_args(parser, "--micro-batch-size", 1)
-            # mbs for calculating the log probs, will be ignored if `use_dynamic_batch_size` is set.
-            parser.add_argument(
-                "--ref-micro-batch-size",
-                type=int,
-                default=None,
-                help=(
-                    "Micro batch size for calculating log probs, as we won't do backward during log probs calculation, "
-                    "we can set it to a larger value than the micro batch size for training. "
-                    "This will be ignored if `use_dynamic_batch_size` is set."
-                ),
-            )
             parser.add_argument(
                 "--balance-data",
                 action="store_true",
@@ -509,7 +498,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
                 default=None,
                 help="lower bound of the value for Dual-clip PPO from https://arxiv.org/pdf/1912.09729",
             )
-            parser.add_argument("--kl-coef", type=float, default=0.00, help="KL penalty in PPO")
+            parser.add_argument(
+                "--kl-coef",
+                type=float,
+                default=0.00,
+                help="KL penalty coefficient for reward shaping. This is applied to the reward signal before advantage calculation.",
+            )
             parser.add_argument(
                 "--loss-type",
                 type=str,
@@ -555,7 +549,12 @@ def get_slime_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--use-kl-loss", action="store_true", default=False, help="whether to use KL loss from GRPO"
             )
-            parser.add_argument("--kl-loss-coef", type=float, default=0.0, help="KL penalty in PPO")
+            parser.add_argument(
+                "--kl-loss-coef",
+                type=float,
+                default=0.0,
+                help="KL penalty coefficient for the loss function. This is added to the final PPO loss.",
+            )
             parser.add_argument("--entropy-coef", type=float, default=0.0, help="Entropy loss coef")
             parser.add_argument("--gamma", type=float, default=1.0, help="Discount factor for rewards in REINFORCE++.")
             parser.add_argument("--normalize-advantages", action="store_true", default=False)
@@ -828,9 +827,6 @@ def parse_args(add_custom_arguments=None):
 
     args = set_default_megatron_args(args)
 
-    if args.ref_micro_batch_size is None:
-        args.ref_micro_batch_size = args.micro_batch_size
-
     if args.kl_coef != 0 or args.use_kl_loss:
         if not os.path.exists(args.ref_load):
             raise FileNotFoundError(f"ref_load {args.ref_load} does not exist, please check the path.")
@@ -982,6 +978,7 @@ def hf_validate_args(args, hf_config):
         ("intermediate_size", "ffn_hidden_size", equal),
         ("tie_word_embeddings", "untie_embeddings_and_output_weights", lambda x, y: not x == y),
         ("rms_norm_eps", "norm_epsilon", equal),
+        ("rope_theta", "rotary_base", equal),
     ]:
         if hasattr(hf_config, hf_config_name):
             assert compare_fn(getattr(hf_config, hf_config_name), getattr(args, megatron_config_name)), (
